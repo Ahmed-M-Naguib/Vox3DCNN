@@ -2,6 +2,8 @@ import CNN3D
 import tensorflow as tf
 import numpy as np
 import os
+import shutil
+
 
 class Vox3DCNN_model():
     def __init__(self):
@@ -42,14 +44,37 @@ class Vox3DCNN_model():
         para_d = [var for var in tf.trainable_variables() if any(x in var.name for x in ['conv', 'Vox3DCNN'])]
         self.optimizer = tf.train.AdamOptimizer(learning_rate=self.lr, beta1=self.beta).minimize(self.loss, var_list=para_d)
         self.saver = tf.train.Saver()
-
     def read_data(self, data_dir):
-        return [], []
-
+        dirs = [f for f in os.listdir(data_dir) if os.path.isdir(os.path.join(data_dir, f))]
+        data = []
+        labels = []
+        label = 0
+        for _dir in dirs:
+            new_path = os.path.join(data_dir, _dir)
+            label += 1
+            files = [x for x in [f for f in os.listdir(new_path) if os.path.isfile(os.path.join(new_path, f))] if
+                     '.csv' in x]
+            print('loading ', _dir, '...')
+            for _file in files:
+                filename = os.path.join(new_path, _file)
+                sample = np.zeros([self.cube_len, self.cube_len, self.cube_len])
+                idxs = np.stack(
+                    [x for x in np.array(np.genfromtxt(filename, delimiter=','), dtype=np.int) if x[3] > 0])[:, 0:3]
+                assert np.max(idxs)<self.cube_len and np.min(idxs)>=0
+                sample[idxs] = 1
+                data.append(sample)
+                labels.append(label)
+        labels = np.asarray(labels)
+        data = np.asarray(data)
+        if data.shape[0]<self.batch_size:
+            labels = np.repeat(labels, np.ceil(self.batch_size/labels.shape[0]), axis=0)
+            data = np.repeat(data, np.ceil(self.batch_size / data.shape[0]), axis=0)
+        return data, labels
     def train(self, data_dir, n_epochs = 100, checkpoint=None, is_dummy=False,):
         sess = tf.Session()
-        if not os.path.exists('log'):
-            os.makedirs('log')
+        if os.path.exists('log'):
+            shutil.rmtree('log')
+        os.makedirs('log')
         self.model.compile_graph('log',sess)
 
         if checkpoint is not None:
@@ -61,17 +86,17 @@ class Vox3DCNN_model():
             print('Using Dummy Data')
         else:
             volumes, labels = self.read_data(data_dir)
-            print('Using ', np.max(labels) + 1 ,' Data')
+            print('Using ', np.max(labels) ,' Data')
         volumes = volumes[..., np.newaxis].astype(np.float)
-        labels = labels.reshape((self.batch_size, 1, 1, 1, 1))
 
         for epoch in range(n_epochs):
 
             idx = np.random.randint(len(volumes), size=self.batch_size)
             x = volumes[idx]
+            l = labels[idx].reshape((self.batch_size, 1, 1, 1, 1))
 
-            summary, loss, _ = sess.run([self.summary, self.loss, self.optimizer], feed_dict={self.input: x, self.labels: labels})
-            print('Discriminator Training ', "epoch: ", epoch, ', d_loss:', loss)
+            summary, loss, _ = sess.run([self.summary, self.loss, self.optimizer], feed_dict={self.input: x, self.labels: l})
+            print('Training epoch: ', epoch, ', loss:', loss)
 
             self.model.add_summary(summary, epoch)
 
@@ -83,4 +108,4 @@ class Vox3DCNN_model():
 
 
 vox = Vox3DCNN_model()
-vox.train('')
+vox.train('data')
