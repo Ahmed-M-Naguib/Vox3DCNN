@@ -82,7 +82,7 @@ class Vox3DCNN_model():
 
         if checkpoint is not None:
             self.saver.restore(sess, checkpoint)
-
+ 
         if is_dummy or not os.path.exists(data_dir):
             volumes = np.random.randint(0, 2, (self.batch_size, self.cube_len, self.cube_len, self.cube_len))
             labels = np.random.randint(0, 10, self.batch_size)
