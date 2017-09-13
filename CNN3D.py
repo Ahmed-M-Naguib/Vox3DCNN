@@ -60,7 +60,7 @@ class conv3D_layer(layer):
                  trainable=True,
                  reuse=False):
         with tf.variable_scope(name, reuse=reuse):
-            self.weights = tf.get_variable('wights', shape=shape, initializer=initializer)
+            self.weights = tf.get_variable('weights', shape=shape, initializer=initializer)
             self.conv3d = tf.nn.conv3d(last_layer.output, self.weights, strides=strides, padding=padding)
             if normalizer is None:
                 self.batch_norm = self.conv3d
@@ -76,8 +76,35 @@ class maxpool_layer(layer):
         pass
 
 class fully_layer(layer):
-    def __init__(self):
-        pass
+    def __init__(self,
+                 last_layer,
+                 features,
+                 name,
+                 activation=tf.nn.sigmoid,
+                 normalizer=None,
+                 initializer=tf.contrib.layers.xavier_initializer(),
+                 trainable=True,
+                 reuse=False):
+        with tf.variable_scope(name, reuse=reuse):
+            in_size=1
+            sizes=last_layer.output.shape.as_list()
+            for i in range(1,len(sizes)):
+                in_size *= sizes[i]
+            print('size = ', in_size)
+            self.weights = tf.get_variable(name='weights', shape=[in_size, features], initializer=initializer)
+            self.biases  = tf.get_variable(name='biases', shape=[features], initializer=initializer)
+            x = tf.reshape(last_layer.output, [-1, in_size])
+            self.linear = tf.nn.bias_add(tf.matmul(x, self.weights), self.biases)
+            if normalizer is None:
+                self.batch_norm = self.linear
+            else:
+                self.batch_norm = normalizer(self.linear, is_training=trainable)
+            if activation is None:
+                self.output = self.batch_norm
+            else:
+                self.output = activation(self.batch_norm)
+                if activation==tf.nn.sigmoid:
+                    self.output = tf.maximum(tf.minimum(self.output, 0.99), 0.01)
 
 class input_layer(layer):
     def __init__(self, shape, name):
@@ -116,6 +143,24 @@ class CNN3D():
                                         trainable,
                                         reuse))
         return self.layers[len(self.layers) - 1].output
+
+    def add_fully_layer(self,
+                        features,
+                        name,
+                        activation=tf.nn.sigmoid,
+                        normalizer=None,
+                        initializer=tf.contrib.layers.xavier_initializer(),
+                        trainable=True,
+                        reuse=False):
+        self.layers.append(fully_layer(self.layers[len(self.layers)-1],
+                                       features,
+                                       name,
+                                       activation,
+                                       normalizer,
+                                       initializer,
+                                       trainable,
+                                       reuse))
+        return self.layers[len(self.layers) - 1].linear, self.layers[len(self.layers) - 1].batch_norm, self.layers[len(self.layers) - 1].output
 
     def compile_graph(self, log_dir, sess):
         self.train_writer = tf.summary.FileWriter(log_dir, sess.graph)
