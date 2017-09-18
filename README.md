@@ -3,4 +3,4 @@
 - Added Deconv layers with shared weights for visualization purposes.
 # TODO:
 - consider bias in deconv layers so that i can add batch norm to conv layers
-- train
+- train on ModelNet40 dataset
