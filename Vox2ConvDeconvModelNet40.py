@@ -63,24 +63,24 @@ class Vox2:
 
         self.last_layer, _, self.last_layer_sigmoid = self.model.add_fully_layer(features=n_objects,
                                                                                  name='full%d' % len(self.model.layers), reuse=False, trainable=True)
+
         self.correct_predictions = tf.equal(tf.argmax(self.last_layer_sigmoid, 1), tf.argmax(self.labels, 1))
         self.accuracy = tf.reduce_mean(tf.cast(self.correct_predictions, "float"))
-        self.summary_accuracy_training = tf.summary.scalar("Accuracy", self.accuracy)
-        self.summary_accuracy_testing = tf.summary.scalar("Accuracy", self.accuracy)
+        self.summary_accuracy = tf.summary.scalar("Accuracy", self.accuracy)
 
         self.loss = tf.nn.sigmoid_cross_entropy_with_logits(logits=self.last_layer, labels=self.labels)
         self.loss = tf.reduce_mean(self.loss)
-        self.summary_loss_training = tf.summary.scalar("Loss", self.loss)
-        self.summary_loss_testing = tf.summary.scalar("Loss", self.loss)
+        self.summary_loss = tf.summary.scalar("Loss", self.loss)
 
-        self.summary_training = tf.summary.merge([self.summary_loss_training, self.summary_accuracy_training])
-        self.summary_testing = tf.summary.merge([self.summary_loss_testing, self.summary_accuracy_testing])
+        self.summary = tf.summary.merge([self.summary_loss, self.summary_accuracy])
 
         para_d = [var for var in tf.trainable_variables() if any(x in var.name for x in ['conv', 'Vox3DCNN'])]
         self.optimizer = tf.train.AdamOptimizer(learning_rate=self.lr, beta1=self.beta).minimize(self.loss, var_list=para_d)
         self.saver = tf.train.Saver()
         self.session = tf.Session()
-        self.model.compile_graph('log', self.session)
+        self.train_writer = tf.summary.FileWriter('log/training', self.session.graph)
+        self.test_writer = tf.summary.FileWriter('log/testing', self.session.graph)
+        tf.global_variables_initializer().run(session=self.session)
 
     def read_model_net(self, data_file, nsamples=-1):
         data = []
@@ -115,6 +115,122 @@ class Vox2:
 
         labels = self.one_hot(labels, self.model.layers[len(self.model.layers)-1].output.shape.as_list()[1])
         data = data[..., np.newaxis].astype(np.float)
+        return data, labels
+
+    def read_next_chunk(self, data_file):
+        data = []
+        labels = []
+        filedata = np.load(data_file)
+        x_ = filedata['features']
+        y_ = filedata['targets']
+        filedata = []
+        del filedata
+
+        self.chunk_no += 1
+        if self.chunk_no >= self.chunk_max:
+            self.chunk_no = 0
+
+        for i in range(self.chunk_no*self.chunk_size, np.minimum(len(x_), (self.chunk_no+1)*self.chunk_size)):
+            data.append(np.reshape(x_[i], [32, 32, 32]))
+            labels.append([y_[i]])
+
+        x_ = []
+        del x_
+        y_ = []
+        del y_
+
+        labels = np.asarray(labels)
+        data = np.asarray(data)
+        if data.shape[0] < self.batch_size:
+            labels = np.repeat(labels, np.ceil(self.batch_size/labels.shape[0]), axis=0)
+            data = np.repeat(data, np.ceil(self.batch_size / data.shape[0]), axis=0)
+
+        labels = self.one_hot(labels, self.model.layers[len(self.model.layers)-1].output.shape.as_list()[1])
+        data = data[..., np.newaxis].astype(np.float)
+        print('loaded %d chunk' % self.chunk_no)
+        return data, labels
+
+    def read_model_net_chunk(self, data_file, nsamples=10000):
+        data = []
+        labels = []
+        filedata = np.load(data_file)
+        x_ = filedata['features']
+        y_ = filedata['targets']
+        filedata=[]
+        del filedata
+
+        self.chunk_size = nsamples
+        self.chunk_max = np.ceil(len(x_)*1.0/self.chunk_size).astype(np.int)
+        self.chunk_no = 0
+
+        for i in range(self.chunk_no*self.chunk_size, np.minimum(len(x_), (self.chunk_no+1)*self.chunk_size)):
+            data.append(np.reshape(x_[i], [32, 32, 32]))
+            labels.append([y_[i]])
+
+        x_ = []
+        del x_
+        y_ = []
+        del y_
+
+        labels = np.asarray(labels)
+        data = np.asarray(data)
+        if data.shape[0] < self.batch_size:
+            labels = np.repeat(labels, np.ceil(self.batch_size/labels.shape[0]), axis=0)
+            data = np.repeat(data, np.ceil(self.batch_size / data.shape[0]), axis=0)
+
+        labels = self.one_hot(labels, self.model.layers[len(self.model.layers)-1].output.shape.as_list()[1])
+        data = data[..., np.newaxis].astype(np.float)
+        print('loaded %d chunk'%self.chunk_no)
+        return data, labels
+
+    def read_next_chunk2(self):
+        data = []
+        labels = []
+
+        self.chunk_no += 1
+        if self.chunk_no >= self.chunk_max:
+            self.chunk_no = 0
+
+        for i in range(self.chunk_no*self.chunk_size, np.minimum(len(self.training_x_), (self.chunk_no+1)*self.chunk_size)):
+            data.append(np.reshape(self.training_x_[i], [32, 32, 32]))
+            labels.append([self.training_y_[i]])
+
+        labels = np.asarray(labels)
+        data = np.asarray(data)
+        if data.shape[0] < self.batch_size:
+            labels = np.repeat(labels, np.ceil(self.batch_size/labels.shape[0]), axis=0)
+            data = np.repeat(data, np.ceil(self.batch_size / data.shape[0]), axis=0)
+
+        labels = self.one_hot(labels, self.model.layers[len(self.model.layers)-1].output.shape.as_list()[1])
+        data = data[..., np.newaxis].astype(np.float)
+        print('loaded %d chunk' % self.chunk_no)
+        return data, labels
+
+    def read_model_net_chunk2(self, data_file, nsamples=1000):
+        data = []
+        labels = []
+        x_ = np.load(data_file)['features']
+        y_ = np.load(data_file)['targets']
+
+        self.training_x_, self.training_y_ = self.shuffle_data(x_, y_)
+
+        self.chunk_size = nsamples
+        self.chunk_max = np.ceil(len(x_)*1.0/self.chunk_size).astype(np.int)
+        self.chunk_no = 0
+
+        for i in range(self.chunk_no*self.chunk_size, np.minimum(len(self.training_x_), (self.chunk_no+1)*self.chunk_size)):
+            data.append(np.reshape(self.training_x_[i], [32, 32, 32]))
+            labels.append([self.training_y_[i]])
+
+        labels = np.asarray(labels)
+        data = np.asarray(data)
+        if data.shape[0] < self.batch_size:
+            labels = np.repeat(labels, np.ceil(self.batch_size/labels.shape[0]), axis=0)
+            data = np.repeat(data, np.ceil(self.batch_size / data.shape[0]), axis=0)
+
+        labels = self.one_hot(labels, self.model.layers[len(self.model.layers)-1].output.shape.as_list()[1])
+        data = data[..., np.newaxis].astype(np.float)
+        print('loaded %d chunk'%self.chunk_no)
         return data, labels
 
     def train(self, data_dir, nsamples=-1, n_epochs=100, checkpoint=None, is_dummy=False,):
@@ -166,26 +282,34 @@ class Vox2:
             os.makedirs('model')
 
         n_epochs = 10000
-        training_x, training_l = self.read_model_net(training_file)
+        training_x, training_l = self.read_model_net_chunk(training_file)
         testing_x, testing_l = self.read_model_net(testing_file)
-        iters = np.floor(len(training_x)*0.2/self.batch_size).astype(np.int)
 
         for epoch in range(n_epochs):
+
+            if epoch % 10 == 9:
+                training_x, training_l = self.read_next_chunk(training_file)
+
+            iters = np.floor(len(training_x)*0.2 / self.batch_size).astype(np.int)
+
             training_x, training_l = self.shuffle_data(training_x, training_l)
             testing_x, testing_l = self.shuffle_data(testing_x, testing_l)
             for iteration in range(iters):
                 self.session.run(self.optimizer, feed_dict={self.input: training_x[iteration*self.batch_size:(iteration+1)*self.batch_size],
                                                             self.labels: training_l[iteration*self.batch_size:(iteration+1)*self.batch_size]})
-            summary_training, loss, acc = self.session.run([self.summary_training, self.loss, self.accuracy],
+            summary_training, loss, acc = self.session.run([self.summary, self.loss, self.accuracy],
                                                            feed_dict={self.input: training_x[:self.batch_size],
                                                                       self.labels: training_l[:self.batch_size]})
-            summary_testing, loss2, acc2 = self.session.run([self.summary_testing, self.loss, self.accuracy],
+            summary_testing, loss2, acc2 = self.session.run([self.summary, self.loss, self.accuracy],
                                                             feed_dict={self.input: testing_x[:self.batch_size],
                                                                        self.labels: testing_l[:self.batch_size]})
             print('Training epoch:', epoch, ', loss:', loss, ', accuracy:', acc)
             print('Testing epoch:', epoch, ', loss:', loss2, ', accuracy:', acc2)
-            self.model.add_summary(summary_training, epoch)
-            self.model.add_summary(summary_testing, epoch)
+            self.train_writer.add_summary(summary_training, epoch)
+            self.train_writer.flush()
+
+            self.test_writer.add_summary(summary_testing, epoch)
+            self.test_writer.flush()
 
             if epoch % 50 == 10:
                 self.saver.save(self.session, save_path='model/biasfree_' + str(epoch) + '.cptk')
@@ -262,5 +386,5 @@ vox = Vox2(40)
 # vox.train('data/ModelNet40/modelnet40_rot_train.npz', n_epochs=600, nsamples=100000)
 # vox.reconstruct_filter(5)
 
-vox.intensive_train(training_file='data/ModelNet40/modelnet40_rot_train.npz',
-                    testing_file='data/ModelNet40/modelnet40_rot_test.npz')
+vox.intensive_train(training_file='data/ModelNet40/modelnet40_rot_train_shuffle.npz',
+                    testing_file='data/ModelNet40/modelnet40_rot_test_shuffle.npz')
